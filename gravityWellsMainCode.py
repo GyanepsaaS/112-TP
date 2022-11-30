@@ -1,5 +1,6 @@
 from cmu_112_graphics import *
 import random
+import math
 
 def appStarted(app):
     #temp code
@@ -7,7 +8,7 @@ def appStarted(app):
     earthRadius = 6400000
     orbitalRadius = 10**7
     universe = SpaceTime()
-    objMass = 1
+    objMass = 4000000000000000000000
     orbitalVelocity = (universe.G * earthMass/orbitalRadius)**0.5
 
     app.positionScale = 10**(-5)   # scaling position (which uses realistic scaling) such that it fits on canvas
@@ -16,11 +17,47 @@ def appStarted(app):
     scaledcx = (app.width//2)/app.positionScale
     scaledcy = (app.height//2)/app.positionScale
 
-    app.player = Player(objMass, [scaledcx, scaledcy-orbitalRadius], [orbitalVelocity, 0], [0, 0])
-    app.planets = []
+    # player temp code
+    playerMass = 5
+    playerScaledInitx = (app.width//2)/app.positionScale
+    playerScaledInity = (app.height//6)/app.positionScale
+
+    app.player = Player(playerMass, [playerScaledInitx, playerScaledInity])
+    planet1 = Satellite(objMass, [scaledcx, scaledcy-orbitalRadius], [orbitalVelocity, 0], [0, 0])
+    app.planets = [planet1]
     app.gravityWell = GravityWell(earthMass, [scaledcx, scaledcy])
     app.timerDelay = 100
     app.universe = SpaceTime()
+    app.numPlanets = random.randint(1, 6)
+
+    # initialise planet positions
+    makePlanets(app)
+
+def mousePressed(app, event):
+    app.player.mousePressed(app, event)
+
+def mouseReleased(app, event):
+    app.player.mouseReleased(app, event)
+
+# generates random planet obstacle positions such that no generated orbits overlap
+# error margin of 10% of planet radius implemented for aesthetic purposes and to avoid collisions due to orbit error
+def makePlanets(app):
+    for i in range(app.numPlanets):
+        # calculate random radius
+        r = random.randint(5, 20)
+        # calculate mass based on radius
+        # exaggerated (exponential) as opposed to proportional to r**3 to exaggerate mass difference based on size
+        mass = 10**r  
+        # Find a legal radius to place the planet at
+        legal = False
+        lowerBound = 1
+        upperBound = min(app.height//2, app.width//2) - r   # max orbital radius before 
+        while not legal:
+            return 0
+            
+    # see if radius is legal
+    # to randomly place at position relative to gravity well
+    pass
 
 # Main Classes
 
@@ -37,30 +74,68 @@ class Satellite(object):
 
     def draw(self, app, canvas):
         scaledPos = [self.pos[0]*app.positionScale, self.pos[1]*app.positionScale]
-        print(self.colour, scaledPos)
+        # debug: print(self.colour, scaledPos)
         x0, y0 = scaledPos[0]-self.r, scaledPos[1]-self.r
         x1, y1 = scaledPos[0]+self.r, scaledPos[1]+self.r
         canvas.create_oval(x0, y0, x1, y1, fill=self.colour)
 
 class GravityWell(Satellite):
-    def __init__(self, m, pos, v = [0, 0], a = [0, 0]):
+    def __init__(self, m, pos):
+        v = [0, 0]
+        a = [0, 0]
         super().__init__(m, pos, v, a)
-        self.r = random.randint(25, 100)
+        self.r = random.randint(25, 75)
         self.colour = 'black'
 
 class Player(Satellite):
-    def __init__(self, m, pos, v, a):
+    def __init__(self, m, pos):
+        v = [0, 0]
+        a = [0, 0]
         super().__init__(m, pos, v, a)
         self.r = 10
         self.colour = 'orange'
+        self.released = 'False'
+        self.clicked = 'False'
+        self.changeFactor = 20 # factor by which acceleration is changed in slingshot launch mechanism
+
+    # defines whether the player has been clicked
+    def mousePressed(self, app, event):
+        scaledPos = [self.pos[0]*app.positionScale, self.pos[1]*app.positionScale]
+        if scaledPos[0]-self.r < event.x < scaledPos[0]+self.r and \
+            scaledPos[1]-self.r < event.y < scaledPos[1]+self.r:
+            self.clicked = True
+
+    # slingshot mechanism:
+    # implements the adjustment of acceleration based on how far back the player drags from the ball
+    # logarithm used to make good, playable dynamics:
+    # i.e. larger range of slingshot pullback that lead to player object orbiting as opposed to being too slow or shooting off stage
+    def mouseReleased(self, app, event):
+        if self.clicked:
+            scaledPos = [self.pos[0]*app.positionScale, self.pos[1]*app.positionScale]
+            # necessary computation for log
+            signx = (scaledPos[0]-event.x)/abs(scaledPos[0]-event.x)
+            signy = (scaledPos[1]-event.y)/abs(scaledPos[1]-event.y)
+            changeVector = [signx*math.log(abs(scaledPos[0]-event.x)), signy*math.log(abs(scaledPos[1]-event.y))]
+            accelerationChange = [changeVector[0]*self.changeFactor, changeVector[1]*self.changeFactor]
+            print(self.a)
+            print(accelerationChange)
+            self.a = [self.a[0]+accelerationChange[0], self.a[1]+accelerationChange[1]]
+            print(self.a)
+            print()
+            self.released = True
+        self.clicked = False
 
 # class SpaceTime contains implementation of gravity
 class SpaceTime(object):
     def __init__(self):
-        self.G = 6.6743 * 10**(-11)  # Gravitational constant
+        self.G = 10 * 10**(-11)  # Gravitational constant - real = 6.6743*10**(-11), changed to get better effects
         self.time = 0
         self.dt = 100  # timestep
 
+    # components of Verlet Integration (second order integrator method):
+    # update position, velocity, and acceleration
+    # Mathematical reference: 
+    # https://www.physics.udel.edu/~bnikolic/teaching/phys660/numerical_ode/node5.html
     def updatePos(self, on):
         # updating position for vector components individually
         for i in range(2):
@@ -68,14 +143,13 @@ class SpaceTime(object):
 
     # calculating gravitational acceleration on "on" by "by" using a = Gm/r**2 in direction r^
     def updateAcceleration(self, on, by):
-        on.aPrev = on.a
         r = (by.pos[0] - on.pos[0], by.pos[1] - on.pos[1])
         # debug: print(f"r = {r}")
         rsquared = r[0]**2 + r[1]**2
         Gm_by_rsq = (self.G * by.m)/rsquared
         a = (Gm_by_rsq * r[0]/(rsquared**0.5), Gm_by_rsq * r[1]/(rsquared**0.5))
         # debug: print(f"a = {a}")
-        on.a = a
+        on.a = [on.a[0]+a[0], on.a[1]+a[1]]
 
     def updateVelocity(self, on):
         # updating velocity for vector components individually
@@ -85,18 +159,54 @@ class SpaceTime(object):
     def updateTime(self):
         self.time += self.dt
 
-    # implements Verlet Integration (second order integrator method) to 
-    # update position, velocity, and acceleration
-    # Mathematical reference: 
-    # https://www.physics.udel.edu/~bnikolic/teaching/phys660/numerical_ode/node5.html
-    def updateAll(self, on, by):
-        self.updatePos(on)
-        self.updateAcceleration(on, by)
-        self.updateVelocity(on)
-        self.updateTime()
-
 def timerFired(app):
-    app.universe.updateAll(app.player, app.gravityWell)
+     updateAll(app)
+
+# updating all satellites based on Verlet integration
+def updateAll(app):
+        # initialise  - As previous and current acceleration required individually for each force, 
+        # dictionary initialised for every object with objects exerting force on it
+        updateAllPos(app)
+        updateAllAcceleration(app)
+        print(f'    {app.player.a}')
+        # sum all aprevs; as
+        updateAllVelocity(app)
+        app.universe.updateTime()
+
+def updateAllPos(app):
+    if app.player.released == True:
+        app.universe.updatePos(app.player)
+    for planet in app.planets:
+        app.universe.updatePos(planet)
+    # gravity wells are stationary
+
+# player mass & gravitational field is taken as too small to affect other Satellites
+def updateAllAcceleration(app):        
+    for planet in app.planets:
+        # update acceleration on planet due to every other planet2
+        planet.aPrev = planet.a     # necessary starting conditions
+        planet.a = [0,0]
+        for planet2 in app.planets:
+            if planet != planet2:  # ensures planet doesn't update its own acceleration
+                app.universe.updateAcceleration(planet, planet2)
+        # update aceleration on planet due to gravity well
+        app.universe.updateAcceleration(planet, app.gravityWell)
+
+    # update acceleration on player due to gravity well
+    if app.player.released == True:
+        app.player.aPrev = app.player.a     # necessary starting conditions
+        app.player.a = [0,0]
+        app.universe.updateAcceleration(app.player, app.gravityWell)
+        # update acceleration on player due to planets
+        for planet in app.planets:
+            app.universe.updateAcceleration(app.player, planet)
+
+def updateAllVelocity(app):
+    if app.player.released == True:
+        app.universe.updateVelocity(app.player)
+    for planet in app.planets:
+        app.universe.updateVelocity(planet)
+    # gravity wells are stationary
 
 def redrawAll(app, canvas):
     app.player.draw(app, canvas)
