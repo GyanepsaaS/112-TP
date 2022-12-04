@@ -14,10 +14,12 @@ def gameMode_mouseDragged(app, event):
     app.player.mouseDragged(app, event)
 
 def gameMode_timerFired(app):
-    checkLose(app)
-    if app.lost == True:
+    if checkLose(app) == True:
         app.mode = 'endMode'
+    if checkWin(app) == True:
+        app.mode = 'winMode'
     updateAll(app)
+    bounce(app)
 
 def gameMode_redrawAll(app, canvas):
     app.player.draw(app, canvas)
@@ -26,6 +28,7 @@ def gameMode_redrawAll(app, canvas):
         planet.draw(app, canvas)
     for gravityWell in app.gravityWells:
         gravityWell.draw(app, canvas)
+    app.portal.draw(canvas, app)
 
 ### End mode
 
@@ -33,6 +36,15 @@ def endMode_redrawAll(app, canvas):
     drawLose(app, canvas)
 
 def endMode_keyPressed(app, canvas):
+    app.mode = 'gameMode'
+    appStarted(app)
+
+### Win mode
+
+def winMode_redrawAll(app, canvas):
+    drawWin(app, canvas)
+
+def winMode_keyPressed(app, canvas):
     app.mode = 'gameMode'
     appStarted(app)
 
@@ -58,15 +70,19 @@ def appStarted(app):
     app.playerScaledInity = (app.height//6)/app.positionScale
     app.playerRadius = app.playerScaledInity
 
+    # game initial conditions
+    app.timerDelay = 25
+    app.numPlanets = random.randint(1, 6)
+    app.mode = 'gameMode'
+
+    # initialising game objects
     app.player = Player(app.playerMass, [app.playerScaledInitx, app.playerScaledInity])
     planet1 = Satellite(objMass, [scaledcx//2, scaledcy//2-orbitalRadius], [orbitalVelocity, 0], [0, 0])
     app.planets = [planet1]
     app.gravityWells = [GravityWell(earthMass, [scaledcx//2, scaledcy//2]), GravityWell(earthMass, [3*scaledcx//2, 3*scaledcy//2])]
-    app.timerDelay = 25
     app.universe = SpaceTime()
-    app.numPlanets = random.randint(1, 6)
-    app.mode = 'gameMode'
-    app.lost = False
+    portalPosition = random.randint(1, 3)
+    app.portal = Portal(portalPosition)
 
     # initialise planet positions
     makePlanets(app)
@@ -84,10 +100,14 @@ def makePlanets(app):
         # select random gravity well to place planet with
         wellNumber = random.randint(0, len(app.gravityWells)-1)
         # get lower and upper bounds for orbit
-        lowerBound = app.gravityWells[wellNumber].r + r  # orbit should be outside the gravity well it orbits
-        upperBound = min(app.width//2 - r, app.playerRadius - r)   # max orbit radius before planet overlaps with starting player position/is out of bounds
+        # orbit should be outside the gravity well it orbits:
+        lowerBound = app.gravityWells[wellNumber].r + r 
+        # max orbit radius before planet overlaps with starting player position/is out of bounds:
+        upperBound = min(app.width//2 - r, app.playerRadius - r)   
         tested = 0    
-        # while not legal and tested < 30:    # limit of tests set so if a certain gravityWell makes it very difficult to place a planet program doesn't have significant lag, simply moves past
+        # limit of tests set so if a certain gravityWell makes it very difficult to place a planet, 
+        # the program doesn't have significant lag, it simply moves past
+        # while not legal and tested < 30: 
         #     orbitr = random.randint(lowerBound, upperBound)
         #     # legality check
         #     legal = legalityCheck(app, orbitr)
@@ -165,13 +185,11 @@ class Player(Satellite):
             if (scaledPos[0]-event.x) != 0 and (scaledPos[0]-event.x) != 0:
                 signx = (scaledPos[0]-event.x)/abs(scaledPos[0]-event.x)
                 signy = (scaledPos[1]-event.y)/abs(scaledPos[1]-event.y)
-            changeVector = [signx*math.log(abs(scaledPos[0]-event.x)), signy*math.log(abs(scaledPos[1]-event.y))]
-            accelerationChange = [changeVector[0]*self.changeFactor, changeVector[1]*self.changeFactor]
-            print(self.a)
-            print(accelerationChange)
+            changeVector = [signx*math.log(abs(scaledPos[0]-event.x)), \
+                signy*math.log(abs(scaledPos[1]-event.y))]
+            accelerationChange = [changeVector[0]*self.changeFactor, \
+                changeVector[1]*self.changeFactor]
             self.a = [self.a[0]+accelerationChange[0], self.a[1]+accelerationChange[1]]
-            print(self.a)
-            print()
             self.released = True
         self.clicked = False
 
@@ -199,9 +217,9 @@ class Player(Satellite):
 # class SpaceTime contains implementation of gravity
 class SpaceTime(object):
     def __init__(self):
-        self.G = 10 * 10**(-11)  # Gravitational constant - real = 6.6743*10**(-11), changed to get better effects
+        self.G = 7 * 10**(-11)  # Gravitational constant - real = 6.6743*10**(-11), changed to get better effects
         self.time = 0
-        self.dt = 100  # timestep
+        self.dt = 75 # timestep (useful to adjust speed)
 
     # components of Verlet Integration (second order integrator method):
     # update position, velocity, and acceleration
@@ -232,6 +250,36 @@ class SpaceTime(object):
     def updateTime(self):
         self.time += self.dt
 
+# Portal to win/next level
+class Portal(object):
+    def __init__(self, position):
+        self.colour = 'blue'
+        self.position = position
+        self.coords = [0, 0, 0, 0]
+        self.length = 50  # half of length
+        self.width = 5  # half of width
+        self.margin = 15 # margin between edge of screen and centre of portal
+    
+    # get coordinates corresponding to the 3 different possible positions (board left, board right, board bottom)
+    def getCoords(self, app):
+        # board left
+        if self.position == 1:
+            self.coords = [self.margin-self.width, app.height//2-self.length, \
+                self.margin+self.width, app.height//2+self.length]
+        # board right
+        if self.position == 2:
+            self.coords = [(app.width-self.margin)-self.width, app.height//2-self.length, \
+                (app.width-self.margin)+self.width, app.height//2+self.length]
+        # board bottom
+        if self.position == 3:
+            self.coords = [app.width//2-self.length, (app.height-self.margin)-self.width, \
+                app.width//2+self.length, (app.height-self.margin)+self.width]
+
+    def draw(self, canvas, app):
+        self.getCoords(app)
+        (x0, y0, x1, y1) = self.coords
+        canvas.create_rectangle(x0, y0, x1, y1, fill=self.colour)
+
 ### Functions to update all objects on screen
 
 # updating all satellites based on Verlet integration
@@ -240,7 +288,6 @@ def updateAll(app):
         # dictionary initialised for every object with objects exerting force on it
         updateAllPos(app)
         updateAllAcceleration(app)
-        print(app.planets[0].a)
         # print(f'    {app.player.a}')
         # sum all aprevs; as
         updateAllVelocity(app)
@@ -306,22 +353,16 @@ def updateAllVelocity(app):
 
 def checkLose(app):
     scaledPos = [app.player.pos[0]*app.positionScale, app.player.pos[1]*app.positionScale]
-    if 0 > scaledPos[0]*app.positionScale or scaledPos[0] > app.width:
-        app.lost = True
-    if 0 > scaledPos[1] or scaledPos[1] > app.height:
-        app.lost = True
+    # if 0 > scaledPos[0] or scaledPos[0] > app.width:
+    #     return True
+    # if 0 > scaledPos[1] or scaledPos[1] > app.height:
+    #     return True
     for planet in app.planets:
         if areColliding(app, app.player, planet):
-            app.lost = True
+            return True
     for gravityWell in app.gravityWells:
         if areColliding(app, app.player, gravityWell):
-            app.lost = True
-
-def areColliding(app, object1, object2):
-    # check if distance between centres is less than sum of radii
-    if distBetween(app, object1, object2) <= (object1.r + object2.r):
-        return True
-    return False
+            return True
 
 def drawLose(app, canvas):
     canvas.create_text(300, 100, text='Lost',
@@ -329,51 +370,62 @@ def drawLose(app, canvas):
     canvas.create_text(300, 200, text='Press any key to play again',
                        fill='black', font='Times 25 bold')
 
+def checkWin(app):
+    if areRectColliding(app, app.player, app.portal):
+        return True
+    return False
 
+def drawWin(app, canvas):
+    canvas.create_text(300, 100, text='Won!!!',
+                       fill='black', font='Times 28 bold')
+    canvas.create_text(300, 200, text='Press any key to play again',
+                       fill='black', font='Times 25 bold')
 
+### Features of game (collisions and bounce on edge)
+
+def areColliding(app, object1, object2):
+    # check if distance between centres is less than sum of radii
+    if distBetween(app, object1, object2) <= (object1.r + object2.r):
+        return True
+    return False
+
+# Rectangle bounds based collision check for portal, which is rectangular
+def areRectColliding(app, object, portal):
+    # get coordinates in x0, y0, x1, y1 form
+    scaledObjPos = [object.pos[0]*app.positionScale, object.pos[1]*app.positionScale]
+    objCoords = [scaledObjPos[0]-object.r, scaledObjPos[1]-object.r, \
+        scaledObjPos[0]+object.r, scaledObjPos[1]+object.r]
+    portalCoords = portal.coords
+
+    # check x of object in bounds of portal
+    if (portalCoords[0] <= objCoords[0] <= portalCoords[2]) \
+        or (portalCoords[0] <= objCoords[2] <= portalCoords[2]):
+        # check y of object in bounds of portal
+        if (portalCoords[1] <= objCoords[1] <= portalCoords[3]) \
+            or (portalCoords[1] <= objCoords[3] <= portalCoords[3]):
+            return True
+    return False
+
+# bounce on edge
+def isOnEdge(app):
+    scaledPos = [app.player.pos[0]*app.positionScale, app.player.pos[1]*app.positionScale]
+    if 0 >= (scaledPos[0]-app.player.r) or (scaledPos[0]+app.player.r) >= app.width:
+        return 'l/r' # left or right edge
+    if 0 >= (scaledPos[1]-app.player.r) or (scaledPos[1]+app.player.r) >= app.height:
+        return 't/b' # top or bottom edge
+    return 'n'  # not on edge
+
+# implementing bounce as inelastic collision with wall
+def bounce(app):
+    # side bounce means horizontal velocity changes
+    if isOnEdge(app) == 'l/r':
+        app.player.v[0] = -app.player.v[0]
+    # top/bottom bounce means vertical velocity changes
+    elif isOnEdge(app) == 't/b':
+        app.player.v[1] = -app.player.v[1]
+
+# Run game
 def playGravityWells():
     runApp(width = 600, height = 600)
 
 playGravityWells()
-
-
-# Tests
-
-# def gravNumericTest():
-#     print("gravTest")
-#     earthMass = 5.97 * 10**24
-#     earthRadius = 6400000
-#     universe = SpaceTime()
-#     objMass = 1
-#     object = Satellite(objMass, [0, 100], [0, 0], [0, 0])
-#     earth = GravityWell(earthMass, [0, -earthRadius], [0, 0], [0, 0])
-
-#     while object.pos[1] >= 0 and object.pos[0] >= 0:
-#         universe.updateAll(object, earth)
-#         print(f"pos = {object.pos}")
-#         print(f"v = {object.v}")
-#         print()
-
-# def orbitNumericTest():
-#     print("orbitTest")
-#     earthMass = 5.97 * 10**24
-#     earthRadius = 6400000
-#     orbitalRadius = 10**7
-#     universe2 = SpaceTime()
-#     objMass = 1
-#     orbitalVelocity = (universe2.G * earthMass/orbitalRadius)**0.5
-#     object = Satellite(objMass, [0, orbitalRadius], [orbitalVelocity, 0], [0, 0])
-#     earth = GravityWell(earthMass, [0, 0], [0, 0], [0, 0])
-
-#     while universe2.time < 100:
-#         universe2.updateAll(object, earth)
-#         print(f"pos = {object.pos}")
-#         print(f"v = {object.v}")
-#         orbitalR = (object.pos[0]**2 + object.pos[1]**2)**0.5
-#         print(f"orbitalR = {orbitalR}")
-#         orbitalV = (object.v[0]**2 + object.v[1]**2)**0.5
-#         print(f"orbitalV = {orbitalV}")
-#         print()
-
-# gravNumericTest()
-# orbitNumericTest()
