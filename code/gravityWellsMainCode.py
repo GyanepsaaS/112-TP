@@ -2,6 +2,19 @@ from cmu_112_graphics import *
 import random
 import math
 
+### Start mode
+
+def startMode_redrawAll(app, canvas):
+    canvas.create_image(app.width//2, app.height//2, image=ImageTk.PhotoImage(app.startBg))
+    for button in app.buttons:
+        button.draw(canvas)
+
+def startMode_mousePressed(app, event):
+    app.mode = 'gameMode'
+    for button in app.buttons:
+        button.mousePressed(app, event)
+
+
 ### Game mode
 
 def gameMode_mousePressed(app, event):
@@ -14,17 +27,27 @@ def gameMode_mouseDragged(app, event):
     app.player.mouseDragged(app, event)
 
 def gameMode_timerFired(app):
+    if app.initialisedObjects == False:
+        # initialise gravity well and planet random positions
+        app.gravityWells = []
+        app.planets = []
+        makeGravityWells(app, app.lvl)
+        makePlanets(app)
+        app.initialisedObjects = True
     if checkLose(app) == True:
         app.lives -= 1
         app.player.reset(app)
     if app.lives == 0:
+        app.initialisedObjects = False
         app.mode = 'endMode'
     if checkWin(app) == True:
+        app.initialisedObjects = False
         app.mode = 'winMode'
     updateAll(app)
     bounce(app)
 
 def gameMode_redrawAll(app, canvas):
+    canvas.create_image(app.width//2, app.height//2, image=ImageTk.PhotoImage(app.gameBg))
     app.player.draw(app, canvas)
     app.player.drawLine(app, canvas)
     for planet in app.planets:
@@ -37,6 +60,7 @@ def gameMode_redrawAll(app, canvas):
 ### End mode
 
 def endMode_redrawAll(app, canvas):
+    canvas.create_image(app.width//2, app.height//2, image=ImageTk.PhotoImage(app.gameBg))
     drawLose(app, canvas)
 
 def endMode_keyPressed(app, canvas):
@@ -46,6 +70,7 @@ def endMode_keyPressed(app, canvas):
 ### Win mode
 
 def winMode_redrawAll(app, canvas):
+    canvas.create_image(app.width//2, app.height//2, image=ImageTk.PhotoImage(app.gameBg))
     drawWin(app, canvas)
 
 def winMode_keyPressed(app, canvas):
@@ -72,9 +97,10 @@ def appStarted(app):
     app.timerDelay = 25
     app.numPlanets = random.randint(1, 6)
     app.lvl = 1
-    app.mode = 'gameMode'
+    app.mode = 'startMode'
     app.lives = 10
     app.wellMargin = (min(app.height, app.width)//3.25) # margin between gravity wells/well and wall
+    app.initialisedObjects = False
 
     # initialising game objects
     app.player = Player(app.playerMass, [app.playerScaledInitx, app.playerScaledInity])
@@ -84,10 +110,19 @@ def appStarted(app):
     portalPosition = random.randint(1, 3)
     app.portal = Portal(portalPosition)
 
+    # importing images
+    app.startBg = app.scaleImage(app.loadImage('startimg.png'), 0.8)
+    app.gameBg = app.scaleImage(app.loadImage('bgimg.png'), 0.8)
+    app.lvl1Img = app.scaleImage(app.loadImage('lvl1.png'), 0.3)
+    app.lvl2Img = app.scaleImage(app.loadImage('lvl2.png'), 0.3)
+    app.lvl3Img = app.scaleImage(app.loadImage('lvl3.png'), 0.3)
 
-    # initialise gravity well and planet random positions
-    makeGravityWells(app, app.lvl)
-    makePlanets(app)
+    # initialising level buttons
+    app.buttons = []
+    app.buttons.append(Button(app.lvl1Img, app.width//4, 2*app.height//3, 1))
+    app.buttons.append(Button(app.lvl2Img, 2*app.width//4, 2*app.height//3, 2))
+    app.buttons.append(Button(app.lvl3Img, 3*app.width//4, 2*app.height//3, 3))
+
 
 ### Generating gameboard
 
@@ -197,14 +232,14 @@ class GravityWell(Satellite):
         a = [0, 0]
         super().__init__(m, pos, v, a)
         self.r = random.randint(15, 30)
-        self.colour = 'black'
+        self.colour = 'white'
 
 class Player(Satellite):
     def __init__(self, m, pos):
         v = [0, 0]
         a = [0, 0]
         super().__init__(m, pos, v, a)
-        self.r = 10
+        self.r = 15
         self.colour = 'orange'
         self.released = False  # Whether the player has been released at least once (start of game/level)
         self.clicked = False  # Whether the player is currently being clicked
@@ -267,7 +302,7 @@ class Player(Satellite):
     def drawLine(self, app, canvas):
         if self.clicked:
             (x0, y0, x1, y1) = self.lineCoords
-            canvas.create_line(x0, y0, x1, y1)
+            canvas.create_line(x0, y0, x1, y1, fill='white')
     
 # class SpaceTime contains implementation of gravity, other constants of the game universe
 class SpaceTime(object):
@@ -338,6 +373,25 @@ class Portal(object):
         self.getCoords(app)
         (x0, y0, x1, y1) = self.coords
         canvas.create_rectangle(x0, y0, x1, y1, fill=self.colour)
+
+# define button class for levels
+class Button(object):
+    def __init__(self, image, cx, cy, lvl):
+        self.image = image
+        self.cx = cx
+        self.cy = cy
+        self.lvl = lvl
+
+    def draw(self, canvas):
+         canvas.create_image(self.cx, self.cy, image=ImageTk.PhotoImage(self.image))
+
+    def mousePressed(self, app, event):
+        imageWidth, imageHeight = self.image.size
+        # check if button is clicked
+        if self.cx-imageWidth//2 < event.x < self.cx+imageWidth//2 and \
+            self.cy-imageHeight//2 < event.y < self.cy+imageHeight//2:
+            app.lvl = self.lvl
+            app.mode = 'gameMode'
 
 ### Functions to update all objects on screen
 
@@ -426,10 +480,10 @@ def checkLose(app):
             return True
 
 def drawLose(app, canvas):
-    canvas.create_text(300, 100, text='Lost',
-                       fill='black', font='Times 28 bold')
+    canvas.create_text(300, 100, text="You're out of lives!",
+                       fill='white', font='Times 28 bold')
     canvas.create_text(300, 200, text='Press any key to play again',
-                       fill='black', font='Times 25 bold')
+                       fill='white', font='Times 25 bold')
 
 def checkWin(app):
     if areRectColliding(app, app.player, app.portal):
@@ -437,10 +491,10 @@ def checkWin(app):
     return False
 
 def drawWin(app, canvas):
-    canvas.create_text(300, 100, text='Won!!!',
-                       fill='black', font='Times 28 bold')
+    canvas.create_text(300, 100, text='You won!!!',
+                       fill='white', font='Times 28 bold')
     canvas.create_text(300, 200, text='Press any key to play again',
-                       fill='black', font='Times 25 bold')
+                       fill='white', font='Times 25 bold')
 
 ### Features of game (collisions and bounce on edge)
 
@@ -489,7 +543,7 @@ def bounce(app):
 # draw number of lives left
 def drawLives(app, canvas):
     livesText = f'Lives left: {app.lives}'
-    canvas.create_text(50, 15, text=livesText,
+    canvas.create_text(60, 15, text=livesText,
                        fill='red', font='Calibri 15')
 
 # Run game
