@@ -15,6 +15,9 @@ def gameMode_mouseDragged(app, event):
 
 def gameMode_timerFired(app):
     if checkLose(app) == True:
+        app.lives -= 1
+        app.player.reset(app)
+    if app.lives == 0:
         app.mode = 'endMode'
     if checkWin(app) == True:
         app.mode = 'winMode'
@@ -29,6 +32,7 @@ def gameMode_redrawAll(app, canvas):
     for gravityWell in app.gravityWells:
         gravityWell.draw(app, canvas)
     app.portal.draw(canvas, app)
+    drawLives(app, canvas)
 
 ### End mode
 
@@ -51,13 +55,6 @@ def winMode_keyPressed(app, canvas):
 ###
 
 def appStarted(app):
-    #temp code
-    earthMass =  5.97 * 10**24
-    orbitalRadius = 10**7
-    universe = SpaceTime()
-    objMass = 4
-    orbitalVelocity = (universe.G * earthMass/orbitalRadius)**0.5
-
     app.positionScale = 10**(-5)   # scaling position (which uses realistic scaling) such that it fits on canvas
 
     # converting centre position on canvas to 'real' scale for reference in initial position arguments
@@ -69,58 +66,108 @@ def appStarted(app):
     app.playerScaledInitx = (app.width//2)/app.positionScale
     app.playerScaledInity = (app.height//6)/app.positionScale
     app.playerRadius = app.playerScaledInity
+    app.wellMass = 6 * 10**24  # mass of gravity wells - close to mass of earth
 
     # game initial conditions
     app.timerDelay = 25
     app.numPlanets = random.randint(1, 6)
+    app.lvl = 1
     app.mode = 'gameMode'
+    app.lives = 10
+    app.wellMargin = (min(app.height, app.width)//3.25) # margin between gravity wells/well and wall
 
     # initialising game objects
     app.player = Player(app.playerMass, [app.playerScaledInitx, app.playerScaledInity])
-    planet1 = Satellite(objMass, [scaledcx//2, scaledcy//2-orbitalRadius], [orbitalVelocity, 0], [0, 0])
-    app.planets = [planet1]
-    app.gravityWells = [GravityWell(earthMass, [scaledcx//2, scaledcy//2]), GravityWell(earthMass, [3*scaledcx//2, 3*scaledcy//2])]
+    app.planets = []
+    app.gravityWells = []
     app.universe = SpaceTime()
     portalPosition = random.randint(1, 3)
     app.portal = Portal(portalPosition)
 
-    # initialise planet positions
+
+    # initialise gravity well and planet random positions
+    makeGravityWells(app, app.lvl)
     makePlanets(app)
 
-# generates random planet obstacle positions in orbit with gravity wells such that no generated orbits overlap with each other or gravity wells
-def makePlanets(app):
-    for i in range(app.numPlanets):
-        # calculate random radius
-        r = random.randint(5, 10)
-        # calculate mass based on radius
-        # exaggerated (exponential) as opposed to proportional to r**3 to exaggerate mass difference based on size
-        mass = 10**r  
-        # Find a legal radius to place the planet at
-        legal = False
-        # select random gravity well to place planet with
-        wellNumber = random.randint(0, len(app.gravityWells)-1)
-        # get lower and upper bounds for orbit
-        # orbit should be outside the gravity well it orbits:
-        lowerBound = app.gravityWells[wellNumber].r + r 
-        # max orbit radius before planet overlaps with starting player position/is out of bounds:
-        upperBound = min(app.width//2 - r, app.playerRadius - r)   
-        tested = 0    
-        # limit of tests set so if a certain gravityWell makes it very difficult to place a planet, 
-        # the program doesn't have significant lag, it simply moves past
-        # while not legal and tested < 30: 
-        #     orbitr = random.randint(lowerBound, upperBound)
-        #     # legality check
-        #     legal = legalityCheck(app, orbitr)
-        #     tested += 1
-            
-    # see if radius is legal
-    # to randomly place at position relative to gravity well
-    pass
+### Generating gameboard
 
-# def legalityCheck(app, orbitr):
-#     for planet in app.planets:
-#         radius = 
-#         if planet.
+# Use backtracking to randomly generate a gameboard with <level number> gravity wells all a certain legal distance from each other
+def makeGravityWells(app, numWells):
+    make = False
+    while make == False:
+        make = makeGravityWellsHelper(app, numWells)
+
+def makeGravityWellsHelper(app, numWells):
+    if numWells == 0:
+        return True
+    else:
+        # defining random x and y a certain distance from the wall
+        (x, y) = (random.randint(app.wellMargin//1.5, app.width-app.wellMargin//1.5), random.randint(app.wellMargin//1.5, app.height-app.wellMargin//1.5))
+        newGravityWell = GravityWell(app.wellMass, [x/app.positionScale, y/app.positionScale])
+        if isLegalWell(app, newGravityWell):
+            app.gravityWells.append(newGravityWell)
+        
+            result = makeGravityWellsHelper(app, numWells-1)
+            if result == True:
+                return result
+            else: 
+                app.gravityWells.pop()
+    return False
+
+# backtracking condition for gravity well legality
+def isLegalWell(app, newGravityWell):
+    if distBetween(app, newGravityWell, app.player) < app.wellMargin:
+        return False
+    for gravityWell in app.gravityWells:
+        if distBetween(app, newGravityWell, gravityWell) < app.wellMargin:
+            return False
+    return True
+
+
+# generates random planet obstacle positions in orbit with gravity wells 
+# such that no generated orbits overlap with each other or gravity wells
+def makePlanets(app):
+    for i in range(len(app.gravityWells)):
+        gravityWell = app.gravityWells[i]
+        if len(app.planets) == 0:  # make first planet
+            # if there are multiple gravity wells...
+            if len(app.gravityWells) > 1:
+                # ...orbit must be greater than gravity well's radius 
+                # and smaller than half the dist to the closest gravity well so it remains in orbit
+                closestWell = getClosestGravityWell(app, gravityWell)
+                halfDistance = distBetween(app, gravityWell, closestWell)//2
+                orbitRadius = random.randint(gravityWell.r+(halfDistance-gravityWell.r)//2, halfDistance)
+            # otherwise...
+            else:
+                # orbit radius is only limited by reasonable constraints for it showing up on the screen
+                orbitRadius = random.randint(gravityWell.r+50, app.width//2)
+            mass = random.randint(10, 10000)
+            orbitVelocity = app.universe.getOrbitVelocity(app.wellMass, orbitRadius//app.positionScale)
+            newPlanet = Satellite(mass, [gravityWell.pos[0], gravityWell.pos[1]-orbitRadius//app.positionScale], [orbitVelocity, 0], [0, 0])
+            newPlanet.orbitRadius = orbitRadius
+            newPlanet.wellIndex = i
+            app.planets.append(newPlanet)
+
+        elif len(app.gravityWells) > 1: # make planets for other wells if legally can
+            orbitRadius = random.randint(gravityWell.r+2, app.wellMargin-2)
+            mass = random.randint(10, 10000)
+            orbitVelocity = app.universe.getOrbitVelocity(app.wellMass, orbitRadius//app.positionScale)
+            newPlanet = Satellite(mass, [gravityWell.pos[0], gravityWell.pos[1]-orbitRadius//app.positionScale], [orbitVelocity, 0], [0, 0])
+            newPlanet.orbitRadius = orbitRadius
+            newPlanet.wellIndex = i
+            app.planets.append(newPlanet)
+
+            # remove newPlanet if it isn't legal
+            if not isLegalPlanet(app, newPlanet, gravityWell):
+                app.planets.pop()
+
+def isLegalPlanet(app, newPlanet, gravityWell):
+    # makes sure orbit doesn't overlap with orbit of other planets
+    for planet in app.planets:
+        # if the distance between the two planets' gravity wells is less than their orbit radii + their radii, orbit isn't legal as collisions occur
+        if distBetween(app, gravityWell, app.gravityWells[planet.wellIndex]) <= planet.orbitRadius + newPlanet.orbitRadius + planet.r + newPlanet.r:
+            return False
+    return True
 
 ### Main Classes
 
@@ -132,13 +179,14 @@ class Satellite(object):
         self.a = a  # acceleration as a vector
         self.aPrev = a
         self.m = m  # mass 
-        self.r = random.randint(5, 25)
+        self.r = random.randint(5, 15)
         self.colour = 'cyan'
         self.captured = False   # Whether the satellite has been 'captured' by a gravity well and hence must be removed from the gameboard
+        self.orbitRadius = 0    # creates an orbit radius variable to allow for comparisons between different planets' orbits
+        self.wellIndex = 0      # to store well index - useful when calculating if planet orbits are overlapping
 
     def draw(self, app, canvas):
         scaledPos = [self.pos[0]*app.positionScale, self.pos[1]*app.positionScale]
-        # debug: print(self.colour, scaledPos)
         x0, y0 = scaledPos[0]-self.r, scaledPos[1]-self.r
         x1, y1 = scaledPos[0]+self.r, scaledPos[1]+self.r
         canvas.create_oval(x0, y0, x1, y1, fill=self.colour)
@@ -148,7 +196,7 @@ class GravityWell(Satellite):
         v = [0, 0]
         a = [0, 0]
         super().__init__(m, pos, v, a)
-        self.r = random.randint(20, 50)
+        self.r = random.randint(15, 30)
         self.colour = 'black'
 
 class Player(Satellite):
@@ -164,6 +212,13 @@ class Player(Satellite):
         self.changeFactor = 30 # factor by which acceleration is changed in slingshot launch mechanism
         self.forceLineLen = 10 # factor affecting length of the line representing force of initial launch
         self.lineCoords = (0, 0, 0, 0)  # The coordinates for drawing the direction of launch line
+
+    # resets movement
+    def reset(self, app):
+        self.pos = [app.playerScaledInitx, app.playerScaledInity]
+        self.v = [0, 0]
+        self.a = [0, 0]
+        self.released = False
 
     # defines whether the player has been clicked
     def mousePressed(self, app, event):
@@ -214,7 +269,7 @@ class Player(Satellite):
             (x0, y0, x1, y1) = self.lineCoords
             canvas.create_line(x0, y0, x1, y1)
     
-# class SpaceTime contains implementation of gravity
+# class SpaceTime contains implementation of gravity, other constants of the game universe
 class SpaceTime(object):
     def __init__(self):
         self.G = 7 * 10**(-11)  # Gravitational constant - real = 6.6743*10**(-11), changed to get better effects
@@ -230,15 +285,19 @@ class SpaceTime(object):
         for i in range(2):
             on.pos[i] += on.v[i]*self.dt + 0.5*on.a[i]*(self.dt**2)
 
+    def getOrbitVelocity(self, mass, orbitRadius):
+        return (self.G * mass/orbitRadius)**0.5
+
     # calculating gravitational acceleration on "on" by "by" using a = Gm/r**2 in direction r^
     def updateAcceleration(self, on, by):
         r = (by.pos[0] - on.pos[0], by.pos[1] - on.pos[1])
-        # debug: print(f"r = {r}")
         rsquared = r[0]**2 + r[1]**2
         Gm_by_rsq = (self.G * by.m)/rsquared
         a = (Gm_by_rsq * r[0]/(rsquared**0.5), Gm_by_rsq * r[1]/(rsquared**0.5))
-        # debug: print(f"a = {a}")
         on.a = [on.a[0]+a[0], on.a[1]+a[1]]
+        # if a planet by some glitch flies into a gravity well, this code ensures it is 'captured'
+        # and doesn't shoot of interfering with other motion 
+        # due to near-infinite acceleration resulting from dividing by smaller quantities
         if rsquared < 10000000000000:
             on.captured = True
 
@@ -288,7 +347,6 @@ def updateAll(app):
         # dictionary initialised for every object with objects exerting force on it
         updateAllPos(app)
         updateAllAcceleration(app)
-        # print(f'    {app.player.a}')
         # sum all aprevs; as
         updateAllVelocity(app)
         app.universe.updateTime()
@@ -312,7 +370,8 @@ def updateAllAcceleration(app):
         # update aceleration on planet due to gravity well  
         # only closest gravity well's acceleration is considered to have a stable orbit for the orbiting planets
         closestGravityWell = getClosestGravityWell(app, planet)
-        app.universe.updateAcceleration(planet, closestGravityWell)
+        if closestGravityWell != None:
+            app.universe.updateAcceleration(planet, closestGravityWell)
 
     # update acceleration on player due to all gravity wells
     if app.player.released == True:
@@ -327,6 +386,8 @@ def updateAllAcceleration(app):
 def getClosestGravityWell(app, planet):
     closestGravityWell = None
     for gravityWell in app.gravityWells:
+        if gravityWell == planet:
+            continue
         if closestGravityWell == None:
             closestGravityWell = gravityWell
         if distBetween(app, gravityWell, planet) <= distBetween(app, closestGravityWell, planet):
@@ -383,6 +444,7 @@ def drawWin(app, canvas):
 
 ### Features of game (collisions and bounce on edge)
 
+# spherical collisions
 def areColliding(app, object1, object2):
     # check if distance between centres is less than sum of radii
     if distBetween(app, object1, object2) <= (object1.r + object2.r):
@@ -423,6 +485,12 @@ def bounce(app):
     # top/bottom bounce means vertical velocity changes
     elif isOnEdge(app) == 't/b':
         app.player.v[1] = -app.player.v[1]
+
+# draw number of lives left
+def drawLives(app, canvas):
+    livesText = f'Lives left: {app.lives}'
+    canvas.create_text(50, 15, text=livesText,
+                       fill='red', font='Calibri 15')
 
 # Run game
 def playGravityWells():
